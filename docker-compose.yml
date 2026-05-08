@@ -65,7 +65,8 @@ services:
   airflow-init:
     <<: *airflow-common
     command: >
-      bash -c "airflow db migrate &&
+      bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager &&
+      airflow db migrate &&
       airflow users create
       --username admin
       --password admin

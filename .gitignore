@@ -9,6 +9,7 @@ __pycache__/
 logs/
 raw_data/*.csv
 raw_data/*.json
+clean_data/*.csv
 postgres_data/
 pgadmin_data/
-
+airflow_postgres_data/

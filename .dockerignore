@@ -1,0 +1,12 @@
+.git/
+.env
+__pycache__/
+*.py[cod]
+.DS_Store
+
+logs/
+raw_data/
+clean_data/
+postgres_data/
+pgadmin_data/
+airflow_postgres_data/

@@ -1,27 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 
-
-OPENAQ_LOCATIONS_URL = "https://api.openaq.org/v3/locations"
-TOKYO_BBOX = "139.55,35.50,139.95,35.85"
+from common import TOKYO_BBOX, load_dotenv, openaq_api_key, openaq_get, timestamped_path, write_json
 
 
 def fetch_locations_page(api_key: str, bbox: str, limit: int, page: int) -> dict[str, Any]:
-    query_string = urlencode({"bbox": bbox, "limit": limit, "page": page})
-    request = Request(
-        f"{OPENAQ_LOCATIONS_URL}?{query_string}",
-        headers={"X-API-Key": api_key},
-    )
-    with urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    return openaq_get("/locations", {"bbox": bbox, "limit": limit, "page": page})
 
 
 def fetch_all_locations(api_key: str, bbox: str, limit: int) -> dict[str, Any]:
@@ -45,10 +33,8 @@ def fetch_all_locations(api_key: str, bbox: str, limit: int) -> dict[str, Any]:
 
 
 def write_raw_payload(payload: dict[str, Any], output_dir: Path) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    output_path = output_dir / f"locations_{timestamp}.json"
-    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    output_path = timestamped_path(output_dir, "locations")
+    write_json(payload, output_path)
     return output_path
 
 
@@ -60,27 +46,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_dotenv(path: Path = Path(".env")) -> None:
-    if not path.exists():
-        return
-
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        key, value = stripped.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
-
-
 def main() -> None:
     load_dotenv()
     args = parse_args()
 
-    api_key = os.getenv("OPENAQ_API_KEY", "").strip()
-    if not api_key or api_key == "replace_with_your_key":
-        raise SystemExit("OPENAQ_API_KEY must be set in .env before fetching data.")
-
-    payload = fetch_all_locations(api_key=api_key, bbox=args.bbox, limit=args.limit)
+    payload = fetch_all_locations(api_key=openaq_api_key(), bbox=args.bbox, limit=args.limit)
     output_path = write_raw_payload(payload, args.output_dir)
     results = payload.get("results", [])
 

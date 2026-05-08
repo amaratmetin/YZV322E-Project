@@ -31,7 +31,7 @@ with DAG(
 
     transform_load = BashOperator(
         task_id="transform_load",
-        bash_command="cd /opt/airflow && python scripts/transform_load.py --mark-complete",
+        bash_command="cd /opt/airflow && python scripts/transform_load.py",
     )
 
     fetch_locations >> fetch_sensors >> fetch_measurements >> transform_load

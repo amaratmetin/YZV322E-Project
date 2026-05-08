@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import os
 from datetime import date
 from datetime import UTC, datetime
@@ -16,6 +15,9 @@ from common import latest_file, load_dotenv, read_json, timestamped_path, write_
 
 
 TOKYO_TZ = ZoneInfo("Asia/Tokyo")
+RAW_DIR = Path("raw_data")
+CLEAN_DIR = Path("clean_data")
+STATE_FILE = RAW_DIR / "ingestion_state.json"
 
 
 def parse_datetime(value: str | None) -> datetime | None:
@@ -332,26 +334,12 @@ def write_clean_csv(frame: pl.DataFrame, output_dir: Path, prefix: str) -> Path:
     return output_path
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Transform raw OpenAQ JSON and load cleaned rows into PostgreSQL.")
-    parser.add_argument("--locations-file", type=Path)
-    parser.add_argument("--sensors-file", type=Path)
-    parser.add_argument("--measurements-file", type=Path)
-    parser.add_argument("--raw-dir", type=Path, default=Path("raw_data"))
-    parser.add_argument("--clean-dir", type=Path, default=Path("clean_data"))
-    parser.add_argument("--state-file", type=Path, default=Path("raw_data/ingestion_state.json"))
-    parser.add_argument("--mark-complete", action="store_true")
-    parser.add_argument("--skip-load", action="store_true")
-    return parser.parse_args()
-
-
 def main() -> None:
     load_dotenv()
-    args = parse_args()
 
-    locations_file = args.locations_file or latest_file(args.raw_dir, "locations_*.json")
-    sensors_file = args.sensors_file or latest_file(args.raw_dir, "sensors_*.json")
-    measurements_file = args.measurements_file or latest_file(args.raw_dir, "measurements_*.json")
+    locations_file = latest_file(RAW_DIR, "locations_*.json")
+    sensors_file = latest_file(RAW_DIR, "sensors_*.json")
+    measurements_file = latest_file(RAW_DIR, "measurements_*.json")
 
     locations = normalize_locations(read_json(locations_file))
     sensors = normalize_sensors(read_json(sensors_file))
@@ -360,10 +348,10 @@ def main() -> None:
     summaries = daily_summaries(measurements)
 
     paths = {
-        "locations_csv": write_clean_csv(locations, args.clean_dir, "locations"),
-        "sensors_csv": write_clean_csv(sensors, args.clean_dir, "sensors"),
-        "measurements_csv": write_clean_csv(measurements, args.clean_dir, "measurements"),
-        "daily_summaries_csv": write_clean_csv(summaries, args.clean_dir, "daily_summaries"),
+        "locations_csv": write_clean_csv(locations, CLEAN_DIR, "locations"),
+        "sensors_csv": write_clean_csv(sensors, CLEAN_DIR, "sensors"),
+        "measurements_csv": write_clean_csv(measurements, CLEAN_DIR, "measurements"),
+        "daily_summaries_csv": write_clean_csv(summaries, CLEAN_DIR, "daily_summaries"),
     }
 
     print(f"Cleaned locations: {locations.height}")
@@ -373,15 +361,11 @@ def main() -> None:
     for label, path in paths.items():
         print(f"{label}: {path}")
 
-    if args.skip_load:
-        return
-
     loaded = load_database(locations, sensors, measurements, summaries)
     print(f"Loaded rows: {loaded}")
 
-    if args.mark_complete:
-        mark_loaded_backfill_dates(measurements_payload, args.state_file)
-        print(f"Updated ingestion state at {args.state_file}")
+    mark_loaded_backfill_dates(measurements_payload, STATE_FILE)
+    print(f"Updated ingestion state at {STATE_FILE}")
 
 
 if __name__ == "__main__":

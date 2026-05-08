@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import os
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -11,6 +10,8 @@ from common import latest_file, load_dotenv, openaq_get, read_json, timestamped_
 
 
 TOKYO_TZ = ZoneInfo("Asia/Tokyo")
+RAW_DIR = Path("raw_data")
+STATE_FILE = RAW_DIR / "ingestion_state.json"
 
 
 def fetch_sensor_measurements(sensor_id: int, start: datetime, end: datetime, limit: int) -> list[dict[str, Any]]:
@@ -78,33 +79,16 @@ def iter_sensors(sensors_payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch raw OpenAQ measurements for saved sensors.")
-    parser.add_argument("--sensors-file", type=Path)
-    parser.add_argument("--raw-dir", type=Path, default=Path("raw_data"))
-    parser.add_argument("--state-file", type=Path, default=Path("raw_data/ingestion_state.json"))
-    parser.add_argument(
-        "--backfill-start-date",
-        type=date.fromisoformat,
-        default=date.fromisoformat(os.getenv("BACKFILL_START_DATE", "2026-05-01")),
-    )
-    parser.add_argument("--limit", type=int, default=int(os.getenv("OPENAQ_MEASUREMENT_LIMIT", "1000")))
-    parser.add_argument("--max-sensors", type=int, help="Optional safety limit for test runs.")
-    parser.add_argument("--mark-complete", action="store_true", help="Mark fetched non-today dates as completed.")
-    return parser.parse_args()
-
-
 def main() -> None:
     load_dotenv()
-    args = parse_args()
+    backfill_start_date = date.fromisoformat(os.getenv("BACKFILL_START_DATE", "2026-05-01"))
+    measurement_limit = int(os.getenv("OPENAQ_MEASUREMENT_LIMIT", "1000"))
 
-    sensors_file = args.sensors_file or latest_file(args.raw_dir, "sensors_*.json")
+    sensors_file = latest_file(RAW_DIR, "sensors_*.json")
     sensors_payload = read_json(sensors_file)
     sensors = iter_sensors(sensors_payload)
-    if args.max_sensors:
-        sensors = sensors[: args.max_sensors]
 
-    dates = target_dates(args.backfill_start_date, args.state_file)
+    dates = target_dates(backfill_start_date, STATE_FILE)
     measurement_groups: list[dict[str, Any]] = []
     total_measurements = 0
 
@@ -115,7 +99,7 @@ def main() -> None:
                 sensor_id=sensor["sensor_id"],
                 start=start,
                 end=end,
-                limit=args.limit,
+                limit=measurement_limit,
             )
             total_measurements += len(measurements)
             measurement_groups.append(
@@ -134,14 +118,8 @@ def main() -> None:
         "total_measurements": total_measurements,
         "results": measurement_groups,
     }
-    output_path = timestamped_path(args.raw_dir, "measurements")
+    output_path = timestamped_path(RAW_DIR, "measurements")
     write_json(output_payload, output_path)
-
-    if args.mark_complete:
-        completed_dates = read_completed_dates(args.state_file)
-        today = datetime.now(TOKYO_TZ).date()
-        completed_dates.update(value for value in dates if value != today)
-        write_completed_dates(args.state_file, completed_dates)
 
     print(f"Target dates: {', '.join(output_payload['target_dates'])}")
     print(f"Processed {len(sensors)} sensors")

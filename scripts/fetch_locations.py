@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import argparse
 import os
 from pathlib import Path
 from typing import Any
 
 from common import TOKYO_BBOX, load_dotenv, openaq_api_key, openaq_get, timestamped_path, write_json
+
+
+RAW_DIR = Path("raw_data")
 
 
 def fetch_locations_page(api_key: str, bbox: str, limit: int, page: int) -> dict[str, Any]:
@@ -38,20 +40,13 @@ def write_raw_payload(payload: dict[str, Any], output_dir: Path) -> Path:
     return output_path
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Fetch raw Tokyo location data from OpenAQ.")
-    parser.add_argument("--bbox", default=os.getenv("OPENAQ_BBOX", TOKYO_BBOX))
-    parser.add_argument("--limit", type=int, default=int(os.getenv("OPENAQ_LOCATION_LIMIT", "100")))
-    parser.add_argument("--output-dir", type=Path, default=Path("raw_data"))
-    return parser.parse_args()
-
-
 def main() -> None:
     load_dotenv()
-    args = parse_args()
+    bbox = os.getenv("OPENAQ_BBOX", TOKYO_BBOX)
+    limit = int(os.getenv("OPENAQ_LOCATION_LIMIT", "100"))
 
-    payload = fetch_all_locations(api_key=openaq_api_key(), bbox=args.bbox, limit=args.limit)
-    output_path = write_raw_payload(payload, args.output_dir)
+    payload = fetch_all_locations(api_key=openaq_api_key(), bbox=bbox, limit=limit)
+    output_path = write_raw_payload(payload, RAW_DIR)
     results = payload.get("results", [])
 
     print(f"Fetched {len(results)} locations across {payload.get('pages_fetched')} pages")

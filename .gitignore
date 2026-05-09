@@ -13,3 +13,4 @@ clean_data/*.csv
 postgres_data/
 pgadmin_data/
 airflow_postgres_data/
+

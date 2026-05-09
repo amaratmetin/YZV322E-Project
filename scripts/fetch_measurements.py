@@ -122,7 +122,7 @@ def main() -> None:
         "elapsed_seconds": 0,
         "results": [],
     }
-    output_path = timestamped_path(RAW_DIR, "measurements")
+    output_path = timestamped_path(RAW_DIR, f"measurements_{target_date.isoformat()}")
     write_json(output_payload, output_path)
 
     active_locations = [

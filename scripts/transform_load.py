@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Any
 
 import polars as pl
 import psycopg2
+from elasticsearch import Elasticsearch, helpers
 from psycopg2.extras import execute_values
 
 from common import latest_file, load_dotenv, read_json, timestamped_path
@@ -14,6 +16,43 @@ from common import latest_file, load_dotenv, read_json, timestamped_path
 
 RAW_DIR = Path("raw_data")
 CLEAN_DIR = Path("clean_data")
+
+MEASUREMENTS_INDEX_TEMPLATE = {
+    "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+    "mappings": {
+        "properties": {
+            "location_id": {"type": "long"},
+            "sensor_id": {"type": "long"},
+            "parameter": {"type": "keyword"},
+            "units": {"type": "keyword"},
+            "value": {"type": "double"},
+            "measurement_date": {"type": "date"},
+            "period_start_utc": {"type": "date"},
+            "period_end_utc": {"type": "date"},
+            "period_start_local": {"type": "date"},
+            "period_end_local": {"type": "date"},
+            "latitude": {"type": "double"},
+            "longitude": {"type": "double"},
+            "location": {"type": "geo_point"},
+            "ingested_at": {"type": "date"},
+        }
+    },
+}
+
+DAILY_SUMMARIES_INDEX_TEMPLATE = {
+    "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+    "mappings": {
+        "properties": {
+            "summary_date": {"type": "date"},
+            "parameter": {"type": "keyword"},
+            "measurement_count": {"type": "long"},
+            "avg_value": {"type": "double"},
+            "min_value": {"type": "double"},
+            "max_value": {"type": "double"},
+            "p50_value": {"type": "double"},
+        }
+    },
+}
 
 
 def parse_datetime(value: str | None) -> datetime | None:
@@ -323,11 +362,105 @@ def write_clean_csv(frame: pl.DataFrame, output_dir: Path, prefix: str) -> Path:
     return output_path
 
 
+def measurements_file_for_date(directory: Path, target_date: str) -> Path:
+    matches: list[Path] = []
+    for path in sorted(directory.glob("measurements_*.json")):
+        try:
+            payload = read_json(path)
+        except (json.JSONDecodeError, OSError):
+            continue
+        if payload.get("target_date") == target_date:
+            matches.append(path)
+    if not matches:
+        raise SystemExit(f"No measurements file found for target_date={target_date} in {directory}")
+    return matches[-1]
+
+
+def elasticsearch_client() -> Elasticsearch:
+    return Elasticsearch(
+        os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200"),
+        request_timeout=30,
+        retry_on_timeout=True,
+        max_retries=3,
+    )
+
+
+def ensure_index(client: Elasticsearch, index: str, body: dict[str, Any]) -> None:
+    if not client.indices.exists(index=index):
+        client.indices.create(index=index, **body)
+
+
+def jsonable(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def measurement_action(index: str, row: dict[str, Any]) -> dict[str, Any]:
+    doc = {key: jsonable(value) for key, value in row.items()}
+    latitude = doc.get("latitude")
+    longitude = doc.get("longitude")
+    if latitude is not None and longitude is not None:
+        doc["location"] = {"lat": latitude, "lon": longitude}
+    period_start = row.get("period_start_utc")
+    period_end = row.get("period_end_utc")
+    period_start_key = period_start.isoformat() if isinstance(period_start, datetime) else period_start
+    period_end_key = period_end.isoformat() if isinstance(period_end, datetime) else period_end
+    return {
+        "_index": index,
+        "_id": f"{row.get('sensor_id')}-{period_start_key}-{period_end_key}",
+        "_source": doc,
+    }
+
+
+def summary_action(index: str, row: dict[str, Any]) -> dict[str, Any]:
+    doc = {key: jsonable(value) for key, value in row.items()}
+    summary_date = row.get("summary_date")
+    summary_key = summary_date.isoformat() if hasattr(summary_date, "isoformat") else summary_date
+    return {
+        "_index": index,
+        "_id": f"{summary_key}-{row.get('parameter')}",
+        "_source": doc,
+    }
+
+
+def index_to_elasticsearch(measurements: pl.DataFrame, summaries: pl.DataFrame) -> dict[str, int]:
+    measurements_index = os.getenv("ES_MEASUREMENTS_INDEX", "aq-measurements")
+    summaries_index = os.getenv("ES_DAILY_SUMMARIES_INDEX", "aq-daily-summaries")
+
+    client = elasticsearch_client()
+    ensure_index(client, measurements_index, MEASUREMENTS_INDEX_TEMPLATE)
+    ensure_index(client, summaries_index, DAILY_SUMMARIES_INDEX_TEMPLATE)
+
+    measurement_actions = [measurement_action(measurements_index, row) for row in measurements.to_dicts()]
+    summary_actions = [summary_action(summaries_index, row) for row in summaries.to_dicts()]
+
+    measurements_indexed = 0
+    summaries_indexed = 0
+    if measurement_actions:
+        measurements_indexed, _ = helpers.bulk(client, measurement_actions, chunk_size=1000, raise_on_error=False)
+    if summary_actions:
+        summaries_indexed, _ = helpers.bulk(client, summary_actions, chunk_size=500, raise_on_error=False)
+
+    client.indices.refresh(index=f"{measurements_index},{summaries_index}")
+    client.close()
+    return {measurements_index: measurements_indexed, summaries_index: summaries_indexed}
+
+
 def main() -> None:
     load_dotenv()
 
     locations_file = latest_file(RAW_DIR, "locations_*.json")
-    measurements_file = latest_file(RAW_DIR, "measurements_*.json")
+    target_date = os.getenv("TARGET_DATE", "").strip()
+    measurements_file = (
+        measurements_file_for_date(RAW_DIR, target_date)
+        if target_date
+        else latest_file(RAW_DIR, "measurements_*.json")
+    )
 
     locations_payload = read_json(locations_file)
     locations = normalize_locations(locations_payload)
@@ -352,6 +485,9 @@ def main() -> None:
 
     loaded = load_database(locations, sensors, measurements, summaries)
     print(f"Loaded rows: {loaded}")
+
+    indexed = index_to_elasticsearch(measurements, summaries)
+    print(f"Indexed rows: {indexed}")
 
 
 if __name__ == "__main__":

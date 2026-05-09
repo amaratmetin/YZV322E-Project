@@ -7,6 +7,7 @@ x-airflow-common: &airflow-common
   environment:
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow
   volumes:
     - ./dags:/opt/airflow/dags
@@ -44,6 +45,7 @@ services:
       - "5050:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,6 +92,18 @@ services:
     depends_on:
       airflow-init:
         condition: service_completed_successfully
+
+  airflow-trigger:
+    <<: *airflow-common
+    command: >
+      bash -c "until airflow dags list | grep -q openaq_tokyo_daily; do
+      echo 'Waiting for openaq_tokyo_daily DAG...';
+      sleep 5;
+      done &&
+      airflow dags unpause openaq_tokyo_daily"
+    depends_on:
+      airflow-scheduler:
+        condition: service_started
 
 volumes:
   postgres_data:

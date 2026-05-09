@@ -6,9 +6,8 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+import requests
 
 
 OPENAQ_BASE_URL = "https://api.openaq.org/v3"
@@ -35,23 +34,22 @@ def openaq_api_key() -> str:
 
 
 def openaq_get(path: str, params: dict[str, Any]) -> dict[str, Any]:
-    query_string = urlencode(params)
-    request = Request(
-        f"{OPENAQ_BASE_URL}{path}?{query_string}",
-        headers={"X-API-Key": openaq_api_key()},
-    )
+    url = f"{OPENAQ_BASE_URL}{path}"
+    headers = {"X-API-Key": openaq_api_key()}
 
     for attempt in range(5):
         try:
-            with urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except HTTPError as error:
-            if error.code not in {429, 500, 502, 503, 504} or attempt == 4:
-                raise
-            retry_after = error.headers.get("Retry-After")
+            response = requests.get(url, params=params, headers=headers, timeout=30)
+            if response.status_code not in {429, 500, 502, 503, 504}:
+                response.raise_for_status()
+                time.sleep(float(os.getenv("OPENAQ_REQUEST_DELAY_SECONDS", "1.1")))
+                return response.json()
+            if attempt == 4:
+                response.raise_for_status()
+            retry_after = response.headers.get("Retry-After")
             delay = int(retry_after) if retry_after and retry_after.isdigit() else 2**attempt
             time.sleep(delay)
-        except URLError:
+        except requests.RequestException:
             if attempt == 4:
                 raise
             time.sleep(2**attempt)

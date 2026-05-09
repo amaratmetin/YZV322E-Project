@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 import os
-from datetime import date
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import polars as pl
 import psycopg2
 from psycopg2.extras import execute_values
 
-from common import latest_file, load_dotenv, read_json, timestamped_path, write_json
+from common import latest_file, load_dotenv, read_json, timestamped_path
 
 
-TOKYO_TZ = ZoneInfo("Asia/Tokyo")
 RAW_DIR = Path("raw_data")
 CLEAN_DIR = Path("clean_data")
-STATE_FILE = RAW_DIR / "ingestion_state.json"
 
 
 def parse_datetime(value: str | None) -> datetime | None:
@@ -68,16 +64,16 @@ def normalize_locations(locations_payload: dict[str, Any]) -> pl.DataFrame:
     return pl.DataFrame(rows)
 
 
-def normalize_sensors(sensors_payload: dict[str, Any]) -> pl.DataFrame:
+def normalize_sensors(locations_payload: dict[str, Any]) -> pl.DataFrame:
     fetched_at = datetime.now(UTC)
     rows: list[dict[str, Any]] = []
 
-    for location_group in sensors_payload.get("results", []):
-        location_id = int(location_group["location_id"])
-        for sensor in location_group.get("sensors", []):
+    for location in locations_payload.get("results", []):
+        location_id = int(location["id"])
+        location_first = location.get("datetimeFirst") or {}
+        location_last = location.get("datetimeLast") or {}
+        for sensor in location.get("sensors", []):
             parameter = sensor.get("parameter") or {}
-            datetime_first = sensor.get("datetimeFirst") or {}
-            datetime_last = sensor.get("datetimeLast") or {}
             rows.append(
                 {
                     "sensor_id": sensor.get("id"),
@@ -85,8 +81,8 @@ def normalize_sensors(sensors_payload: dict[str, Any]) -> pl.DataFrame:
                     "name": sensor.get("name"),
                     "parameter": parameter.get("name") if isinstance(parameter, dict) else None,
                     "units": parameter.get("units") if isinstance(parameter, dict) else None,
-                    "datetime_first_utc": parse_datetime(datetime_first.get("utc")),
-                    "datetime_last_utc": parse_datetime(datetime_last.get("utc")),
+                    "datetime_first_utc": parse_datetime(location_first.get("utc")),
+                    "datetime_last_utc": parse_datetime(location_last.get("utc")),
                     "fetched_at": fetched_at,
                 }
             )
@@ -112,73 +108,91 @@ def normalize_sensors(sensors_payload: dict[str, Any]) -> pl.DataFrame:
     )
 
 
-def normalize_measurements(measurements_payload: dict[str, Any]) -> pl.DataFrame:
-    ingested_at = datetime.now(UTC)
-    rows: list[dict[str, Any]] = []
+def empty_measurements_frame() -> pl.DataFrame:
+    return pl.DataFrame(
+        schema={
+            "location_id": pl.Int64,
+            "sensor_id": pl.Int64,
+            "parameter": pl.Utf8,
+            "units": pl.Utf8,
+            "value": pl.Float64,
+            "measurement_date": pl.Date,
+            "period_start_utc": pl.Datetime(time_zone="UTC"),
+            "period_end_utc": pl.Datetime(time_zone="UTC"),
+            "period_start_local": pl.Datetime(time_zone="UTC"),
+            "period_end_local": pl.Datetime(time_zone="UTC"),
+            "period_label": pl.Utf8,
+            "period_interval": pl.Utf8,
+            "latitude": pl.Float64,
+            "longitude": pl.Float64,
+            "ingested_at": pl.Datetime(time_zone="UTC"),
+        }
+    )
 
-    for sensor_group in measurements_payload.get("results", []):
-        target_date = sensor_group["target_date"]
-        location_id = int(sensor_group["location_id"])
-        sensor_id = int(sensor_group["sensor_id"])
 
-        for measurement in sensor_group.get("measurements", []):
-            parameter = measurement.get("parameter") or {}
-            period = measurement.get("period") or {}
-            period_start = period.get("datetimeFrom") or {}
-            period_end = period.get("datetimeTo") or {}
-            latitude, longitude = coordinates(measurement)
-            rows.append(
-                {
-                    "location_id": location_id,
-                    "sensor_id": sensor_id,
-                    "parameter": parameter.get("name") if isinstance(parameter, dict) else None,
-                    "units": parameter.get("units") if isinstance(parameter, dict) else None,
-                    "value": measurement.get("value"),
-                    "measurement_date": target_date,
-                    "period_start_utc": parse_datetime(period_start.get("utc")),
-                    "period_end_utc": parse_datetime(period_end.get("utc")),
-                    "period_start_local": parse_datetime(period_start.get("local")),
-                    "period_end_local": parse_datetime(period_end.get("local")),
-                    "period_label": period.get("label"),
-                    "period_interval": period.get("interval"),
-                    "latitude": latitude,
-                    "longitude": longitude,
-                    "ingested_at": ingested_at,
-                }
-            )
-
-    if not rows:
-        return pl.DataFrame(
-            schema={
-                "location_id": pl.Int64,
-                "sensor_id": pl.Int64,
-                "parameter": pl.Utf8,
-                "units": pl.Utf8,
-                "value": pl.Float64,
-                "measurement_date": pl.Date,
-                "period_start_utc": pl.Datetime(time_zone="UTC"),
-                "period_end_utc": pl.Datetime(time_zone="UTC"),
-                "period_start_local": pl.Datetime(time_zone="UTC"),
-                "period_end_local": pl.Datetime(time_zone="UTC"),
-                "period_label": pl.Utf8,
-                "period_interval": pl.Utf8,
-                "latitude": pl.Float64,
-                "longitude": pl.Float64,
-                "ingested_at": pl.Datetime(time_zone="UTC"),
-            }
-        )
+def read_archive_csv(path: Path, target_date: str, ingested_at: datetime) -> pl.DataFrame:
+    frame = pl.read_csv(path)
+    if frame.is_empty():
+        return empty_measurements_frame()
 
     return (
-        pl.DataFrame(rows)
+        frame.rename({"sensors_id": "sensor_id", "lat": "latitude", "lon": "longitude"})
+        .with_columns(
+            pl.lit(target_date).str.to_date().alias("measurement_date"),
+            pl.col("datetime")
+            .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%z", strict=False)
+            .dt.convert_time_zone("UTC")
+            .alias("period_start_utc"),
+            pl.col("datetime")
+            .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%z", strict=False)
+            .alias("period_start_local"),
+            pl.col("value").cast(pl.Float64, strict=False),
+            pl.lit(None).cast(pl.Utf8).alias("period_label"),
+            pl.lit(None).cast(pl.Utf8).alias("period_interval"),
+            pl.lit(ingested_at).alias("ingested_at"),
+        )
+        .with_columns(
+            pl.col("period_start_utc").alias("period_end_utc"),
+            pl.col("period_start_local").alias("period_end_local"),
+        )
+        .select(
+            "location_id",
+            "sensor_id",
+            "parameter",
+            "units",
+            "value",
+            "measurement_date",
+            "period_start_utc",
+            "period_end_utc",
+            "period_start_local",
+            "period_end_local",
+            "period_label",
+            "period_interval",
+            "latitude",
+            "longitude",
+            "ingested_at",
+        )
+    )
+
+
+def normalize_measurements(measurements_payload: dict[str, Any]) -> pl.DataFrame:
+    ingested_at = datetime.now(UTC)
+    target_date = measurements_payload["target_date"]
+    frames = [
+        read_archive_csv(Path(result["path"]), target_date, ingested_at)
+        for result in measurements_payload.get("results", [])
+        if result.get("status") == "downloaded" and result.get("path")
+    ]
+
+    if not frames:
+        return empty_measurements_frame()
+
+    return (
+        pl.concat(frames, how="vertical_relaxed")
         .filter(
             pl.col("parameter").is_not_null()
             & pl.col("value").is_not_null()
             & pl.col("period_start_utc").is_not_null()
-            & pl.col("period_end_utc").is_not_null()
-        )
-        .with_columns(
-            pl.col("measurement_date").str.to_date(),
-            pl.col("value").cast(pl.Float64),
         )
         .unique(subset=["sensor_id", "period_start_utc", "period_end_utc"], keep="last")
     )
@@ -303,31 +317,6 @@ def load_database(locations: pl.DataFrame, sensors: pl.DataFrame, measurements: 
     return loaded
 
 
-def read_completed_dates(path: Path) -> set[date]:
-    if not path.exists():
-        return set()
-    payload = read_json(path)
-    return {date.fromisoformat(value) for value in payload.get("completed_dates", [])}
-
-
-def write_completed_dates(path: Path, completed_dates: set[date]) -> None:
-    write_json(
-        {"completed_dates": [value.isoformat() for value in sorted(completed_dates)]},
-        path,
-    )
-
-
-def mark_loaded_backfill_dates(measurements_payload: dict[str, Any], state_file: Path) -> None:
-    today = datetime.now(TOKYO_TZ).date()
-    target_dates = {
-        date.fromisoformat(value)
-        for value in measurements_payload.get("target_dates", [])
-    }
-    completed_dates = read_completed_dates(state_file)
-    completed_dates.update(value for value in target_dates if value != today)
-    write_completed_dates(state_file, completed_dates)
-
-
 def write_clean_csv(frame: pl.DataFrame, output_dir: Path, prefix: str) -> Path:
     output_path = timestamped_path(output_dir, prefix, ".csv")
     frame.write_csv(output_path)
@@ -338,11 +327,11 @@ def main() -> None:
     load_dotenv()
 
     locations_file = latest_file(RAW_DIR, "locations_*.json")
-    sensors_file = latest_file(RAW_DIR, "sensors_*.json")
     measurements_file = latest_file(RAW_DIR, "measurements_*.json")
 
-    locations = normalize_locations(read_json(locations_file))
-    sensors = normalize_sensors(read_json(sensors_file))
+    locations_payload = read_json(locations_file)
+    locations = normalize_locations(locations_payload)
+    sensors = normalize_sensors(locations_payload)
     measurements_payload = read_json(measurements_file)
     measurements = normalize_measurements(measurements_payload)
     summaries = daily_summaries(measurements)
@@ -363,9 +352,6 @@ def main() -> None:
 
     loaded = load_database(locations, sensors, measurements, summaries)
     print(f"Loaded rows: {loaded}")
-
-    mark_loaded_backfill_dates(measurements_payload, STATE_FILE)
-    print(f"Updated ingestion state at {STATE_FILE}")
 
 
 if __name__ == "__main__":

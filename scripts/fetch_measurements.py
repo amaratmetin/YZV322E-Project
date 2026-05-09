@@ -54,7 +54,14 @@ def archive_path(location_id: int, target_date: date) -> Path:
 
 def download_archive_file(session: requests.Session, url: str, output_path: Path) -> tuple[str, int]:
     for attempt in range(4):
-        response = session.get(url, timeout=60)
+        try:
+            response = session.get(url, timeout=60)
+        except requests.RequestException:
+            if attempt == 3:
+                return "failed", 0
+            time.sleep(2**attempt)
+            continue
+
         if response.status_code == 404:
             return "missing", 0
         if response.status_code in {500, 502, 503, 504} and attempt < 3:
@@ -74,8 +81,11 @@ def download_location(location: dict[str, Any], target_date: date) -> dict[str, 
     url = archive_url(location_id, target_date)
     file_path = archive_path(location_id, target_date)
 
-    with requests.Session() as session:
-        status, size_bytes = download_archive_file(session, url, file_path)
+    try:
+        with requests.Session() as session:
+            status, size_bytes = download_archive_file(session, url, file_path)
+    except requests.RequestException:
+        status, size_bytes = "failed", 0
 
     return {
         "location_id": location_id,

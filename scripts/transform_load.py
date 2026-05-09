@@ -343,17 +343,20 @@ def write_clean_csv(frame: pl.DataFrame, output_dir: Path, prefix: str) -> Path:
 
 
 def measurements_file_for_date(directory: Path, target_date: str) -> Path:
-    matches: list[Path] = []
+    matching_payloads: list[Path] = []
     for path in sorted(directory.glob("measurements_*.json")):
         try:
             payload = read_json(path)
         except (json.JSONDecodeError, OSError):
             continue
         if payload.get("target_date") == target_date:
-            matches.append(path)
-    if not matches:
+            matching_payloads.append(path)
+    if not matching_payloads:
         raise SystemExit(f"No measurements file found for target_date={target_date} in {directory}")
-    return matches[-1]
+
+    date_named_matches = [path for path in matching_payloads if path.name.startswith(f"measurements_{target_date}_")]
+    candidates = date_named_matches or matching_payloads
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def elasticsearch_client() -> Elasticsearch:

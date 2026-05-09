@@ -17,6 +17,7 @@ from pathlib import Path
 MEASUREMENTS_PATTERN_ID = "aq-measurements-pattern"
 SUMMARIES_PATTERN_ID = "aq-daily-summaries-pattern"
 DASHBOARD_ID = "tokyo-air-quality-dashboard"
+PARAMETER_TERMS_SIZE = 20
 
 OUTPUT_PATH = Path(__file__).parent / "saved_objects.ndjson"
 
@@ -66,7 +67,7 @@ def line_vis_state(title: str, metric_field: str, time_field: str, group_field: 
         "aggs": [
             {"id": "1", "enabled": True, "type": "avg", "schema": "metric", "params": {"field": metric_field}},
             {"id": "2", "enabled": True, "type": "date_histogram", "schema": "segment", "params": {"field": time_field, "interval": "auto"}},
-            {"id": "3", "enabled": True, "type": "terms", "schema": "group", "params": {"field": group_field, "size": 8, "order": "desc", "orderBy": "1"}},
+            {"id": "3", "enabled": True, "type": "terms", "schema": "group", "params": {"field": group_field, "size": PARAMETER_TERMS_SIZE, "order": "desc", "orderBy": "1"}},
         ],
         "params": {
             "type": "line",
@@ -118,7 +119,7 @@ def pie_vis_state(title: str, group_field: str) -> dict:
         "type": "pie",
         "aggs": [
             {"id": "1", "enabled": True, "type": "count", "schema": "metric", "params": {}},
-            {"id": "2", "enabled": True, "type": "terms", "schema": "segment", "params": {"field": group_field, "size": 8, "order": "desc", "orderBy": "1"}},
+            {"id": "2", "enabled": True, "type": "terms", "schema": "segment", "params": {"field": group_field, "size": PARAMETER_TERMS_SIZE, "order": "desc", "orderBy": "1"}},
         ],
         "params": {"type": "pie", "addTooltip": True, "addLegend": True, "legendPosition": "right", "isDonut": True},
     }

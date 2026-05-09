@@ -29,8 +29,6 @@ MEASUREMENTS_INDEX_TEMPLATE = {
             "measurement_date": {"type": "date"},
             "period_start_utc": {"type": "date"},
             "period_end_utc": {"type": "date"},
-            "period_start_local": {"type": "date"},
-            "period_end_local": {"type": "date"},
             "latitude": {"type": "double"},
             "longitude": {"type": "double"},
             "location": {"type": "geo_point"},
@@ -158,10 +156,6 @@ def empty_measurements_frame() -> pl.DataFrame:
             "measurement_date": pl.Date,
             "period_start_utc": pl.Datetime(time_zone="UTC"),
             "period_end_utc": pl.Datetime(time_zone="UTC"),
-            "period_start_local": pl.Datetime(time_zone="UTC"),
-            "period_end_local": pl.Datetime(time_zone="UTC"),
-            "period_label": pl.Utf8,
-            "period_interval": pl.Utf8,
             "latitude": pl.Float64,
             "longitude": pl.Float64,
             "ingested_at": pl.Datetime(time_zone="UTC"),
@@ -182,17 +176,11 @@ def read_archive_csv(path: Path, target_date: str, ingested_at: datetime) -> pl.
             .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%z", strict=False)
             .dt.convert_time_zone("UTC")
             .alias("period_start_utc"),
-            pl.col("datetime")
-            .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%z", strict=False)
-            .alias("period_start_local"),
             pl.col("value").cast(pl.Float64, strict=False),
-            pl.lit(None).cast(pl.Utf8).alias("period_label"),
-            pl.lit(None).cast(pl.Utf8).alias("period_interval"),
             pl.lit(ingested_at).alias("ingested_at"),
         )
         .with_columns(
             pl.col("period_start_utc").alias("period_end_utc"),
-            pl.col("period_start_local").alias("period_end_local"),
         )
         .select(
             "location_id",
@@ -203,10 +191,6 @@ def read_archive_csv(path: Path, target_date: str, ingested_at: datetime) -> pl.
             "measurement_date",
             "period_start_utc",
             "period_end_utc",
-            "period_start_local",
-            "period_end_local",
-            "period_label",
-            "period_interval",
             "latitude",
             "longitude",
             "ingested_at",
@@ -306,10 +290,6 @@ def insert_measurements(connection: psycopg2.extensions.connection, rows: list[d
         "measurement_date",
         "period_start_utc",
         "period_end_utc",
-        "period_start_local",
-        "period_end_local",
-        "period_label",
-        "period_interval",
         "latitude",
         "longitude",
         "ingested_at",

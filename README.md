@@ -1,8 +1,8 @@
 # Tokyo Air Quality Pipeline
 
-End-to-end containerized data engineering pipeline that ingests daily air quality measurements from Tokyo sensors via the [OpenAQ](https://openaq.org) public archive, transforms and loads them into PostgreSQL, and indexes them into Elasticsearch for interactive Kibana dashboards.
+Tokyo Air Quality Pipeline is a Docker-containerized data pipeline that extracts daily air pollutant measurements from Tokyo sensors via [OpenAQ](https://openaq.org) public archive, then transforms the raw data using the Polars library and loads it into a PostgreSQL database for permanency and an Elasticsearch index for Kibana visualizations.
 
-Built for **YZV322E — Applied Data Engineering**, Istanbul Technical University, Spring 2026.
+This project was built for the course YZV322E Applied Data Engineering @ Istanbul Technical University, Spring 2026.
 
 ---
 
@@ -41,7 +41,7 @@ Built for **YZV322E — Applied Data Engineering**, Istanbul Technical Universit
    (localhost:5050)
 ```
 
-**Data flow summary:** Airflow schedules one DAG run per day for April 2026. Each run fetches location metadata from the OpenAQ API, downloads the corresponding day's CSV archives from S3 in parallel, normalizes the data with Polars, upserts into Postgres, and bulk-indexes into Elasticsearch. Pipeline stages communicate via timestamped JSON files in `raw_data/` — not XCom — so each stage can be re-run independently.
+**Data flow summary:** Airflow schedules one DAG run per all days of April 2026. Each run fetches location data regarding suitable sensors from the OpenAQ API, downloads the corresponding day's CSV archives from S3 in parallel(this is not done on the API due to rate limits). The raw data is then normalized with Polars, inserted into or updated in Postgres, and bulk-indexed into Elasticsearch for interactive Kibana dashboards. Pipeline stages communicate via timestamped JSON files in `raw_data/`, as opposed to XCom, so each stage can be re-run independently.
 
 ---
 
@@ -49,25 +49,25 @@ Built for **YZV322E — Applied Data Engineering**, Istanbul Technical Universit
 
 | Tool | Role |
 |---|---|
-| **Apache Airflow 2.10.5** | DAG orchestration, scheduling, catchup backfill |
-| **PostgreSQL 16** | Relational storage — source of truth |
-| **pgAdmin 4** | Database administration UI |
-| **Elasticsearch 8.15** | Document indexing for analytics queries |
-| **Kibana 8.15** | Interactive dashboards and visualizations |
-| **Polars 1.35** | Fast columnar transformation in Python |
+| **Apache Airflow 2.10.5** | Used for scheduling tasks, creating and running them as DAGs and "catching up" with the tasks. |
+| **PostgreSQL 16** | Relational storage database for cleaned and summarized information, used for persistence and would allow further analysis if needed. |
+| **pgAdmin 4** | Database administration system to quickly and easily monitor the PostgreSQL database.|
+| **Elasticsearch 8.15** | Record indexing, primarily to integrate data into Kibana. |
+| **Kibana 8.15** | Interactive dashboards and visualizations. |
+| **Polars 1.35** | Fast columnar transformation in Python, picked in place of Pandas due to size of the data at hand. |
 
 ---
 
 ## Quick Start
 
-**Prerequisites:** Docker and Docker Compose. No Python, pip, or any other runtime needed on the host machine.
+**Prerequisites:** Docker and Docker Compose. As indicated on the requirements, no sort of installations are necessary on the host machine.
 
 ```bash
 # 1. Clone the repository
 git clone <repo-url>
 cd YZV322E-Project
 
-# 2. Set up environment (add your OpenAQ API key)
+# 2. Set up environment and add your OpenAQ API Key (see https://docs.openaq.org/using-the-api/api-key for details)
 cp .env.example .env
 # edit .env and set OPENAQ_API_KEY=<your key>
 
@@ -75,7 +75,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The pipeline starts automatically. Airflow backfills all 30 days of April 2026 via `catchup=True`. Full backfill takes approximately 10–20 minutes depending on network speed.
+The pipeline starts automatically. Airflow backfills all 30 days of April 2026 as `catchup=True` is set. Depending on network speed, downloading and processing the entirety of the April data may take between 10 to 20 minutes. Because demo does not have this much time, our showcase will be conducted on data we have access to.
 
 ### Service URLs
 
@@ -85,23 +85,23 @@ The pipeline starts automatically. Airflow backfills all 30 days of April 2026 v
 | pgAdmin | http://localhost:5050 | see `.env` |
 | Kibana | http://localhost:5601 | no auth |
 | Elasticsearch | http://localhost:9200 | no auth |
-| Postgres | localhost:**5433** | see `.env` |
+| Postgres | http://localhost:5432 | see `.env` |
 
 ### Stop and Reset
 
 ```bash
-docker compose down          # stop (data persists in named volumes)
-docker compose down -v       # stop AND wipe all data (full clean restart)
+docker compose down          # stops the pipeline, but bind mounts and volumes keep the persistent data.
+docker compose down -v       # stops and wipes all data (full clean restart)
 ```
 
 ---
 
 ## Example Commands
 
-Run individual pipeline stages manually inside the scheduler container:
+You can run individual pipeline stages manually inside the scheduler container:
 
 ```bash
-# Fetch location metadata
+# Fetching location data
 docker compose exec airflow-scheduler bash -c \
   "cd /opt/airflow && python scripts/fetch_locations.py"
 
@@ -118,7 +118,7 @@ docker compose exec airflow-scheduler \
   airflow dags trigger openaq_tokyo_daily -e 2026-04-15
 ```
 
-Re-generate Kibana saved objects after editing `kibana/build_saved_objects.py`:
+For re-generating Kibana saved objects after editing, `kibana/build_saved_objects.py`:
 
 ```bash
 python kibana/build_saved_objects.py
@@ -147,11 +147,10 @@ python kibana/build_saved_objects.py
 
 ## Known Limitations
 
-- **April 2026 only:** The DAG schedule (`0 0 1-30 4 *`) and `end_date` are hardcoded to April 2026. No data outside this window is fetched or processed.
-- **Requires internet on first run:** Location metadata and S3 archive files are downloaded live; there is no offline mode.
-- **No real-time ingestion:** The pipeline is batch-only (one run per day). OpenAQ sensor data is fetched from the S3 archive with roughly 24-hour latency.
-- **Elasticsearch security disabled:** `xpack.security.enabled=false` for local development simplicity. Not suitable for production.
-- **Single-node Elasticsearch:** Configured with 1 shard and 0 replicas (`ES_JAVA_OPTS: -Xms512m -Xmx512m`). Designed for a laptop, not a production cluster.
+- **April 2026 only:** The DAG schedule and `end_date` are hardcoded to April 2026. No data outside this window is fetched or processed. This has been clearly communicated in the abstract.
+- **Requires internet on first run:** Location metadata and S3 archive files are downloaded live; there is no offline mode. However, as the committing of large files is disliked, we do not have any other solutions to this.
+- **No real-time ingestion:** The pipeline is batch-only (one run per day). OpenAQ sensor data would be fetched from the S3 archive with roughly 24-hour latency at best. Daily delay is a 72 hour delay in practice, as the data bucket we are using has a 3-day delay for writing records.
+- **Elasticsearch security disabled:** `xpack.security.enabled=false` for local development simplicity. Not suitable for production. This is the standard usage we have seen in course, and therefore disabling security was decided on, due to ease of use. For the same reason, our Elasticsearch runs on a single node as well.
 - **S3 archive gaps:** Some location-days return HTTP 404 (no data uploaded by the sensor). These are counted as `missing` and skipped cleanly.
 
 ---
@@ -164,6 +163,7 @@ python kibana/build_saved_objects.py
 | Hasan Yalçın Arıkanoğlu | 150220341 |
 | Metin Furkan Amarat | 150230301 |
 
+Note: Due to technical reasons outside our control(mainly WSL usage and 2FA complications), commits by Metin Furkan Amarat are shared across two GitHub accounts. I hereby declare and confirm that both "amaratmetin" and "mmmm-tr" accounts are mine and their commits belong to my single person.
 ---
 
 *YZV322E — Applied Data Engineering · Istanbul Technical University · Spring 2026*

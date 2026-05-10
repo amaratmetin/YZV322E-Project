@@ -256,7 +256,7 @@ def main() -> None:
         visualization(
             "viz-top-locations",
             "Top locations by measurement count",
-            bar_vis_state("Top locations by measurement count", group_field="location_id", size=10),
+            bar_vis_state("Top locations by measurement count", group_field="location_name", size=10),
             MEASUREMENTS_PATTERN_ID,
         )
     )

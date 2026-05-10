@@ -75,7 +75,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The pipeline starts automatically. Airflow backfills all 30 days of April 2026 as `catchup=True` is set. Depending on network speed, downloading and processing the entirety of the April data may take between 10 to 20 minutes. Because demo does not have this much time, our showcase will be conducted on data we have access to.
+The pipeline starts automatically. Airflow backfills all 30 days of April 2026 as `catchup=True` is set. Depending on network speed, downloading and processing the entirety of the April data may take between 5 to 15 minutes. As it may go over the allocated time for the demo, we will be showcasing our pipeline and visualizations through the downloads.
 
 ### Service URLs
 

@@ -240,7 +240,7 @@ def dashboard(panels: list[dict], references: list[dict]) -> dict:
 def main() -> None:
     objects: list[dict] = []
 
-    objects.append(index_pattern(MEASUREMENTS_PATTERN_ID, "aq-measurements*", "period_start_utc"))
+    objects.append(index_pattern(MEASUREMENTS_PATTERN_ID, "aq-measurements*", "measurement_time_utc"))
     objects.append(index_pattern(SUMMARIES_PATTERN_ID, "aq-daily-summaries*", "summary_date"))
 
     objects.append(

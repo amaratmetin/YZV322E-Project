@@ -28,8 +28,7 @@ MEASUREMENTS_INDEX_TEMPLATE = {
             "units": {"type": "keyword"},
             "value": {"type": "double"},
             "measurement_date": {"type": "date"},
-            "period_start_utc": {"type": "date"},
-            "period_end_utc": {"type": "date"},
+            "measurement_time_utc": {"type": "date"},
             "latitude": {"type": "double"},
             "longitude": {"type": "double"},
             "location": {"type": "geo_point"},
@@ -155,8 +154,7 @@ def empty_measurements_frame() -> pl.DataFrame:
             "units": pl.Utf8,
             "value": pl.Float64,
             "measurement_date": pl.Date,
-            "period_start_utc": pl.Datetime(time_zone="UTC"),
-            "period_end_utc": pl.Datetime(time_zone="UTC"),
+            "measurement_time_utc": pl.Datetime(time_zone="UTC"),
             "latitude": pl.Float64,
             "longitude": pl.Float64,
             "ingested_at": pl.Datetime(time_zone="UTC"),
@@ -176,12 +174,12 @@ def read_archive_csv(path: Path, target_date: str, ingested_at: datetime) -> pl.
             pl.col("datetime")
             .str.to_datetime(format="%Y-%m-%dT%H:%M:%S%z", strict=False)
             .dt.convert_time_zone("UTC")
-            .alias("period_start_utc"),
+            .alias("measurement_time_utc"),
             pl.col("value").cast(pl.Float64, strict=False),
             pl.lit(ingested_at).alias("ingested_at"),
         )
         .with_columns(
-            pl.col("period_start_utc").alias("period_end_utc"),
+            pl.col("measurement_time_utc")
         )
         .select(
             "location_id",
@@ -190,8 +188,7 @@ def read_archive_csv(path: Path, target_date: str, ingested_at: datetime) -> pl.
             "units",
             "value",
             "measurement_date",
-            "period_start_utc",
-            "period_end_utc",
+            "measurement_time_utc",
             "latitude",
             "longitude",
             "ingested_at",
@@ -216,9 +213,9 @@ def normalize_measurements(measurements_payload: dict[str, Any]) -> pl.DataFrame
         .filter(
             pl.col("parameter").is_not_null()
             & pl.col("value").is_not_null()
-            & pl.col("period_start_utc").is_not_null()
+            & pl.col("measurement_time_utc").is_not_null()
         )
-        .unique(subset=["sensor_id", "period_start_utc", "period_end_utc"], keep="last")
+        .unique(subset=["sensor_id", "measurement_time_utc"], keep="last")
     )
 
 
@@ -289,8 +286,7 @@ def insert_measurements(connection: psycopg2.extensions.connection, rows: list[d
         "units",
         "value",
         "measurement_date",
-        "period_start_utc",
-        "period_end_utc",
+        "measurement_time_utc",
         "latitude",
         "longitude",
         "ingested_at",
@@ -299,7 +295,7 @@ def insert_measurements(connection: psycopg2.extensions.connection, rows: list[d
     query = f"""
         INSERT INTO measurements ({", ".join(columns)})
         VALUES %s
-        ON CONFLICT (sensor_id, period_start_utc, period_end_utc)
+        ON CONFLICT (sensor_id, measurement_time_utc)
         DO NOTHING
     """
     with connection.cursor() as cursor:
@@ -395,13 +391,11 @@ def measurement_action(index: str, row: dict[str, Any], location_names: dict[int
         name = location_names.get(int(location_id))
         if name:
             doc["location_name"] = name
-    period_start = row.get("period_start_utc")
-    period_end = row.get("period_end_utc")
-    period_start_key = period_start.isoformat() if isinstance(period_start, datetime) else period_start
-    period_end_key = period_end.isoformat() if isinstance(period_end, datetime) else period_end
+    measurement_time = row.get("measurement_time_utc")
+    measurement_key = measurement_time.isoformat() if isinstance(measurement_time, datetime) else measurement_time
     return {
         "_index": index,
-        "_id": f"{row.get('sensor_id')}-{period_start_key}-{period_end_key}",
+        "_id": f"{row.get('sensor_id')}-{measurement_key}",
         "_source": doc,
     }
 

@@ -28,12 +28,11 @@ CREATE TABLE IF NOT EXISTS measurements (
     units TEXT,
     value DOUBLE PRECISION NOT NULL,
     measurement_date DATE NOT NULL,
-    period_start_utc TIMESTAMPTZ NOT NULL,
-    period_end_utc TIMESTAMPTZ NOT NULL,
+    measurement_time_utc TIMESTAMPTZ NOT NULL,
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
     ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (sensor_id, period_start_utc, period_end_utc)
+    UNIQUE (sensor_id, measurement_time_utc)
 );
 
 CREATE TABLE IF NOT EXISTS daily_summaries (

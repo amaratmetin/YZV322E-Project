@@ -150,7 +150,7 @@ python kibana/build_saved_objects.py
 - **April 2026 only:** The DAG schedule and `end_date` are hardcoded to April 2026. No data outside this window is fetched or processed. This has been clearly communicated in the abstract.
 - **Requires internet on first run:** Location metadata and S3 archive files are downloaded live; there is no offline mode. However, as the committing of large files is disliked, we do not have any other solutions to this.
 - **No real-time ingestion:** The pipeline is batch-only (one run per day). OpenAQ sensor data would be fetched from the S3 archive with roughly 24-hour latency at best. Daily delay is a 72 hour delay in practice, as the data bucket we are using has a 3-day delay for writing records.
-- **Elasticsearch security disabled:** `xpack.security.enabled=false` for local development simplicity. Not suitable for production. This is the standard usage we have seen in course, and therefore disabling security was decided on, due to ease of use. For the same reason, our Elasticsearch runs on a single node as well.
+- **Elasticsearch security disabled:** `xpack.security.enabled=false` for local development simplicity, this is admittedly not suitable for production. However, it is the standard usage we have seen in course, and therefore disabling security was decided on, due to ease of use. For the same reason, our Elasticsearch runs on a single node as well.
 - **S3 archive gaps:** Some location-days return HTTP 404 (no data uploaded by the sensor). These are counted as `missing` and skipped cleanly.
 
 ---

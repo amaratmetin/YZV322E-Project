@@ -9,21 +9,12 @@ from typing import Any
 
 import requests
 
-from common import latest_file, load_dotenv, read_json, timestamped_path, write_json
+from common import latest_file, load_dotenv, read_json, timestamped_path, write_json, parse_api_datetime
 
 
 RAW_DIR = Path("raw_data")
 ARCHIVE_DIR = RAW_DIR / "archive"
 URL_ROOT = "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid="
-
-
-def parse_api_datetime(value: dict[str, Any] | None) -> datetime | None:
-    if not value:
-        return None
-    raw = value.get("utc")
-    if not raw:
-        return None
-    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
 
 
 def location_covers_date(location: dict[str, Any], target_date: date) -> bool:
@@ -122,7 +113,7 @@ def main() -> None:
         "elapsed_seconds": 0,
         "results": [],
     }
-    output_path = timestamped_path(RAW_DIR, "measurements")
+    output_path = timestamped_path(RAW_DIR, f"measurements_{target_date.isoformat()}")
     write_json(output_payload, output_path)
 
     active_locations = [

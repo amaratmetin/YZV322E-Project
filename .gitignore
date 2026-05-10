@@ -7,9 +7,10 @@ __pycache__/
 .DS_Store
 
 logs/
-raw_data/*.csv
+raw_data/archive/
 raw_data/*.json
 clean_data/*.csv
 postgres_data/
 pgadmin_data/
 airflow_postgres_data/
+

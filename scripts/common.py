@@ -77,3 +77,11 @@ def timestamped_path(directory: Path, prefix: str, suffix: str = ".json") -> Pat
 def write_json(payload: dict[str, Any], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+def parse_api_datetime(value: dict[str, Any] | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.get("utc")
+    if not raw:
+        return None
+    return datetime.fromisoformat(raw.replace("Z", "+00:00"))

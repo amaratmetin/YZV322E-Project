@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from common import TOKYO_BBOX, load_dotenv, openaq_get, timestamped_path, write_json
+from common import TOKYO_BBOX, load_dotenv, openaq_get, timestamped_path, write_json, parse_api_datetime
 
 
 RAW_DIR = Path("raw_data")
@@ -35,15 +35,6 @@ def fetch_all_locations(bbox: str, limit: int) -> dict[str, Any]:
     latest_payload["results"] = all_results
     latest_payload["pages_fetched"] = page
     return latest_payload
-
-
-def parse_api_datetime(value: dict[str, Any] | None) -> datetime | None:
-    if not value:
-        return None
-    raw = value.get("utc")
-    if not raw:
-        return None
-    return datetime.fromisoformat(raw.replace("Z", "+00:00"))
 
 
 def date_window(start_date: date, end_date: date) -> tuple[datetime, datetime]:

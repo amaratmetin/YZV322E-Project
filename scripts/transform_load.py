@@ -22,6 +22,7 @@ MEASUREMENTS_INDEX_TEMPLATE = {
     "mappings": {
         "properties": {
             "location_id": {"type": "long"},
+            "location_name": {"type": "keyword"},
             "sensor_id": {"type": "long"},
             "parameter": {"type": "keyword"},
             "units": {"type": "keyword"},
@@ -343,17 +344,20 @@ def write_clean_csv(frame: pl.DataFrame, output_dir: Path, prefix: str) -> Path:
 
 
 def measurements_file_for_date(directory: Path, target_date: str) -> Path:
-    matches: list[Path] = []
+    matching_payloads: list[Path] = []
     for path in sorted(directory.glob("measurements_*.json")):
         try:
             payload = read_json(path)
         except (json.JSONDecodeError, OSError):
             continue
         if payload.get("target_date") == target_date:
-            matches.append(path)
-    if not matches:
+            matching_payloads.append(path)
+    if not matching_payloads:
         raise SystemExit(f"No measurements file found for target_date={target_date} in {directory}")
-    return matches[-1]
+
+    date_named_matches = [path for path in matching_payloads if path.name.startswith(f"measurements_{target_date}_")]
+    candidates = date_named_matches or matching_payloads
+    return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
 def elasticsearch_client() -> Elasticsearch:
@@ -380,12 +384,17 @@ def jsonable(value: Any) -> Any:
     return value
 
 
-def measurement_action(index: str, row: dict[str, Any]) -> dict[str, Any]:
+def measurement_action(index: str, row: dict[str, Any], location_names: dict[int, str]) -> dict[str, Any]:
     doc = {key: jsonable(value) for key, value in row.items()}
     latitude = doc.get("latitude")
     longitude = doc.get("longitude")
     if latitude is not None and longitude is not None:
         doc["location"] = {"lat": latitude, "lon": longitude}
+    location_id = row.get("location_id")
+    if location_id is not None:
+        name = location_names.get(int(location_id))
+        if name:
+            doc["location_name"] = name
     period_start = row.get("period_start_utc")
     period_end = row.get("period_end_utc")
     period_start_key = period_start.isoformat() if isinstance(period_start, datetime) else period_start
@@ -408,7 +417,17 @@ def summary_action(index: str, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def index_to_elasticsearch(measurements: pl.DataFrame, summaries: pl.DataFrame) -> dict[str, int]:
+def location_name_lookup(locations: pl.DataFrame) -> dict[int, str]:
+    if locations.is_empty():
+        return {}
+    return {
+        int(row["location_id"]): row["name"]
+        for row in locations.select("location_id", "name").to_dicts()
+        if row.get("location_id") is not None and row.get("name")
+    }
+
+
+def index_to_elasticsearch(locations: pl.DataFrame, measurements: pl.DataFrame, summaries: pl.DataFrame) -> dict[str, int]:
     measurements_index = os.getenv("ES_MEASUREMENTS_INDEX", "aq-measurements")
     summaries_index = os.getenv("ES_DAILY_SUMMARIES_INDEX", "aq-daily-summaries")
 
@@ -416,7 +435,8 @@ def index_to_elasticsearch(measurements: pl.DataFrame, summaries: pl.DataFrame) 
     ensure_index(client, measurements_index, MEASUREMENTS_INDEX_TEMPLATE)
     ensure_index(client, summaries_index, DAILY_SUMMARIES_INDEX_TEMPLATE)
 
-    measurement_actions = [measurement_action(measurements_index, row) for row in measurements.to_dicts()]
+    location_names = location_name_lookup(locations)
+    measurement_actions = [measurement_action(measurements_index, row, location_names) for row in measurements.to_dicts()]
     summary_actions = [summary_action(summaries_index, row) for row in summaries.to_dicts()]
 
     measurements_indexed = 0
@@ -466,7 +486,7 @@ def main() -> None:
     loaded = load_database(locations, sensors, measurements, summaries)
     print(f"Loaded rows: {loaded}")
 
-    indexed = index_to_elasticsearch(measurements, summaries)
+    indexed = index_to_elasticsearch(locations, measurements, summaries)
     print(f"Indexed rows: {indexed}")
 
 

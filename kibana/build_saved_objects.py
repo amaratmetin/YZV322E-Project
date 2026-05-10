@@ -17,6 +17,7 @@ from pathlib import Path
 MEASUREMENTS_PATTERN_ID = "aq-measurements-pattern"
 SUMMARIES_PATTERN_ID = "aq-daily-summaries-pattern"
 DASHBOARD_ID = "tokyo-air-quality-dashboard"
+PARAMETER_TERMS_SIZE = 20
 
 OUTPUT_PATH = Path(__file__).parent / "saved_objects.ndjson"
 
@@ -30,9 +31,9 @@ def index_pattern(object_id: str, title: str, time_field: str) -> dict:
     }
 
 
-def visualization(object_id: str, title: str, vis_state: dict, pattern_id: str) -> dict:
+def visualization(object_id: str, title: str, vis_state: dict, pattern_id: str, query: str = "") -> dict:
     search_source = {
-        "query": {"query": "", "language": "kuery"},
+        "query": {"query": query, "language": "kuery"},
         "filter": [],
         "indexRefName": "kibanaSavedObjectMeta.searchSourceJSON.index",
     }
@@ -59,6 +60,10 @@ def visualization(object_id: str, title: str, vis_state: dict, pattern_id: str) 
     }
 
 
+def parameter_query(parameters: list[str]) -> str:
+    return " or ".join(f'parameter : "{parameter}"' for parameter in parameters)
+
+
 def line_vis_state(title: str, metric_field: str, time_field: str, group_field: str, y_axis_title: str) -> dict:
     return {
         "title": title,
@@ -66,7 +71,7 @@ def line_vis_state(title: str, metric_field: str, time_field: str, group_field: 
         "aggs": [
             {"id": "1", "enabled": True, "type": "avg", "schema": "metric", "params": {"field": metric_field}},
             {"id": "2", "enabled": True, "type": "date_histogram", "schema": "segment", "params": {"field": time_field, "interval": "auto"}},
-            {"id": "3", "enabled": True, "type": "terms", "schema": "group", "params": {"field": group_field, "size": 8, "order": "desc", "orderBy": "1"}},
+            {"id": "3", "enabled": True, "type": "terms", "schema": "group", "params": {"field": group_field, "size": PARAMETER_TERMS_SIZE, "order": "desc", "orderBy": "1"}},
         ],
         "params": {
             "type": "line",
@@ -118,7 +123,7 @@ def pie_vis_state(title: str, group_field: str) -> dict:
         "type": "pie",
         "aggs": [
             {"id": "1", "enabled": True, "type": "count", "schema": "metric", "params": {}},
-            {"id": "2", "enabled": True, "type": "terms", "schema": "segment", "params": {"field": group_field, "size": 8, "order": "desc", "orderBy": "1"}},
+            {"id": "2", "enabled": True, "type": "terms", "schema": "segment", "params": {"field": group_field, "size": PARAMETER_TERMS_SIZE, "order": "desc", "orderBy": "1"}},
         ],
         "params": {"type": "pie", "addTooltip": True, "addLegend": True, "legendPosition": "right", "isDonut": True},
     }
@@ -240,21 +245,6 @@ def main() -> None:
 
     objects.append(
         visualization(
-            "viz-avg-by-parameter",
-            "Average pollutant value over time",
-            line_vis_state(
-                "Average pollutant value over time",
-                metric_field="value",
-                time_field="period_start_utc",
-                group_field="parameter",
-                y_axis_title="Average value",
-            ),
-            MEASUREMENTS_PATTERN_ID,
-        )
-    )
-
-    objects.append(
-        visualization(
             "viz-count-by-parameter",
             "Measurement count by parameter",
             pie_vis_state("Measurement count by parameter", group_field="parameter"),
@@ -266,7 +256,7 @@ def main() -> None:
         visualization(
             "viz-top-locations",
             "Top locations by measurement count",
-            bar_vis_state("Top locations by measurement count", group_field="location_id", size=10),
+            bar_vis_state("Top locations by measurement count", group_field="location_name", size=10),
             MEASUREMENTS_PATTERN_ID,
         )
     )
@@ -282,25 +272,59 @@ def main() -> None:
 
     objects.append(
         visualization(
-            "viz-daily-avg",
-            "Daily average per parameter",
+            "viz-daily-avg-gases",
+            "Daily average: gases only",
             line_vis_state(
-                "Daily average per parameter",
+                "Daily average: gases only",
+                metric_field="avg_value",
+                time_field="summary_date",
+                group_field="parameter",
+                y_axis_title="Daily average (ppm)",
+            ),
+            SUMMARIES_PATTERN_ID,
+            query=parameter_query(["co", "no", "no2", "nox", "so2"]),
+        )
+    )
+
+    objects.append(
+        visualization(
+            "viz-daily-avg-particles",
+            "Daily average: particles only",
+            line_vis_state(
+                "Daily average: particles only",
                 metric_field="avg_value",
                 time_field="summary_date",
                 group_field="parameter",
                 y_axis_title="Daily average",
             ),
             SUMMARIES_PATTERN_ID,
+            query=parameter_query(["pm1", "pm25", "um003"]),
+        )
+    )
+
+    objects.append(
+        visualization(
+            "viz-daily-avg-weather",
+            "Daily average: weather/other only",
+            line_vis_state(
+                "Daily average: weather/other only",
+                metric_field="avg_value",
+                time_field="summary_date",
+                group_field="parameter",
+                y_axis_title="Daily average",
+            ),
+            SUMMARIES_PATTERN_ID,
+            query=parameter_query(["temperature", "relativehumidity"]),
         )
     )
 
     panel_definitions = [
         ("viz-total-measurements", "Total measurements", 0, 0, 12, 6),
         ("viz-count-by-parameter", "Measurement count by parameter", 12, 0, 24, 12),
-        ("viz-avg-by-parameter", "Average pollutant value over time", 0, 6, 12, 12),
-        ("viz-daily-avg", "Daily average per parameter", 0, 18, 24, 12),
-        ("viz-top-locations", "Top locations by measurement count", 24, 18, 24, 12),
+        ("viz-daily-avg-gases", "Daily average: gases only", 0, 6, 16, 12),
+        ("viz-daily-avg-particles", "Daily average: particles only", 16, 6, 16, 12),
+        ("viz-daily-avg-weather", "Daily average: weather/other only", 32, 6, 16, 12),
+        ("viz-top-locations", "Top locations by measurement count", 0, 18, 48, 12),
     ]
     panels: list[dict] = []
     references: list[dict] = []

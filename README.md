@@ -94,6 +94,18 @@ docker compose down          # stops the pipeline, but bind mounts and volumes k
 docker compose down -v       # stops and wipes all data (full clean restart)
 ```
 
+### Resource Calibration
+
+The S3 download step downloads files in parallel. The number of parallel downloads is controlled by `S3_DOWNLOAD_WORKERS` in `.env`.
+
+The default value should work on most laptops, but if Docker or Airflow becomes unstable on a weaker machine, this value can be lowered:
+
+```env
+S3_DOWNLOAD_WORKERS=8
+```
+
+If the machine is very limited, `4` can also be used. This only makes downloading slower; it does not change the final data or the dashboard.
+
 ---
 
 ## Example Commands
@@ -118,7 +130,19 @@ docker compose exec airflow-scheduler \
   airflow dags trigger openaq_tokyo_daily -e 2026-04-15
 ```
 
-For re-generating Kibana saved objects after editing, `kibana/build_saved_objects.py`:
+### Developer-only Kibana Dashboard Generation
+
+`kibana/build_saved_objects.py` is only a developer tool. We run it when we change the Kibana plots, and it creates `kibana/saved_objects.ndjson`.
+
+Regular users do not need to run this script. The generated `.ndjson` file is already committed to the repository, and `kibana-init` imports it automatically when running:
+
+```bash
+docker compose up --build
+```
+
+So the project still starts with a single Docker Compose command.
+
+If a developer changes the dashboard definition in `kibana/build_saved_objects.py`, they can regenerate the committed Kibana saved object file with:
 
 ```bash
 python kibana/build_saved_objects.py

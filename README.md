@@ -163,7 +163,7 @@ python kibana/build_saved_objects.py
 | Hasan Yalçın Arıkanoğlu | 150220341 |
 | Metin Furkan Amarat | 150230301 |
 
-Note: Due to technical reasons outside our control(mainly WSL usage and 2FA complications), commits by Metin Furkan Amarat are shared across two GitHub accounts. I hereby declare and confirm that both "amaratmetin" and "mmmm-tr" accounts are mine and their commits belong to my single person.
 ---
+*Note: Due to technical reasons outside our control(mainly WSL usage and 2FA complications), commits by Metin Furkan Amarat are shared across two GitHub accounts. I hereby declare and confirm that both "amaratmetin" and "mmmm-tr" accounts are mine and their commits belong to my single person.*
 
 *YZV322E — Applied Data Engineering · Istanbul Technical University · Spring 2026*
